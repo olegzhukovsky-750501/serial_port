@@ -32,7 +32,7 @@ void SerialPortReader::handleTimeout()
     if (readData.isEmpty())
     {
         QString status = QObject::tr("No data was currently available "
-                                        "for reading from port %1\n")
+                                        "for reading from port %1")
                             .arg(serialPort->portName());
         emit statusUpdated(status);
     }
@@ -42,11 +42,35 @@ void SerialPortReader::handleTimeout()
 //Обработчик сигнала QSerialPort::errorOccured
 void SerialPortReader::handleError(QSerialPort::SerialPortError serialPortError)
 {
-    if (serialPortError == QSerialPort::ReadError) {
-        QString status = QObject::tr("An I/O error occurred while reading "
-                                        "the data from port %1, error: %2\n")
+    QString status;
+    switch(serialPortError)
+    {
+    case QSerialPort::ParityError :
+    {
+        status = QObject::tr("Parity error occurred while reading "
+                                        "the data from port %1, error: %2")
                             .arg(serialPort->portName())
                             .arg(serialPort->errorString());
-        emit statusUpdated(status);
+        break;
     }
+    case QSerialPort::ReadError :
+    {
+        status = QObject::tr("An I/O error occurred while reading "
+                                        "the data from port %1, error: %2")
+                            .arg(serialPort->portName())
+                            .arg(serialPort->errorString());
+        break;
+    }
+    case QSerialPort::FramingError :
+    {
+        status = QObject::tr("Framing error occurred while reading "
+                             "the data from port %1, error: %2")
+                 .arg(serialPort->portName())
+                 .arg(serialPort->errorString());
+        break;
+    }
+    }
+
+
+    emit statusUpdated(status);
 }

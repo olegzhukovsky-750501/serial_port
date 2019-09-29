@@ -5,9 +5,12 @@
 #include <QProcess>
 #include <QMessageBox>
 #include <QSerialPort>
+#include <QTime>
 #include <QSerialPortInfo>
 #include <QThread>
+#include <QTextCursor>
 #include "serialportreader.h"
+#include "mytextedit.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
@@ -39,10 +42,10 @@ private slots:
 
     void updateStatus(QString info);
 
-    void on_textEdit_textChanged();    
+    void keyPressed(QChar data);
 private:
     Ui::MainWindow *ui;
-    QThread *readerThread;
+    QThread *readerThread = nullptr;
     SerialPortReader *serialPortReader;
     QSerialPort *serialPort = nullptr;
     int online = 0;

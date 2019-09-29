@@ -19,10 +19,12 @@ DEFINES += QT_DEPRECATED_WARNINGS
 SOURCES += \
     main.cpp \
     mainwindow.cpp \
+    mytextedit.cpp \
     serialportreader.cpp
 
 HEADERS += \
     mainwindow.h \
+    mytextedit.h \
     serialportreader.h
 
 FORMS += \

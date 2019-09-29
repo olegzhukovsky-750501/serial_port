@@ -7,6 +7,9 @@ MainWindow::MainWindow(QWidget *parent)
 {
     ui->setupUi(this);
 
+    //Соединие сигнал о том, что клавиша была нажата в поле Input, со слотом записи данных в порт
+    connect(ui->textEdit, SIGNAL(sendData(QChar)), this, SLOT(keyPressed(QChar)));
+
     //Заполнение выпадающего списка всеми доступными портами в системе
     QStringList ports = availablePorts();
     ui->comboBox->insertItems(0, ports);
@@ -73,7 +76,7 @@ QSerialPort::Parity MainWindow::getParityByComboBoxIndex()
     }
 }
 
-//Получение названия режима четности соответствующего значению currParity в enum QSerialPort::Parity
+//Получение названия режима четности соответствующего значению в enum QSerialPort::Parity
 QString MainWindow::getParityNameByValue()
 {
     int currParity = serialPort->parity();
@@ -88,7 +91,7 @@ QString MainWindow::getParityNameByValue()
     }
 }
 
-//Получение значения стоп бита соответствующего значению stopBitValue в enum QSerialPort::StopBits
+//Получение значения стоп бита соответствующего значению в enum QSerialPort::StopBits
 double MainWindow::getStopBitCountByValue()
 {
     int stopBitValue = serialPort->stopBits();
@@ -119,8 +122,6 @@ void MainWindow::setSerialPortInfo()
 //Вывод информации о последовательном порте в Debug область приложения
 void MainWindow::showSerialPortInfo()
 {
-    ui->textEdit_3->setText("Connected to: " + serialPort->portName() + " port");
-
     int currDataBits = serialPort->dataBits();
     ui->textEdit_3->append("Byte size: " + QString::number(currDataBits));
 
@@ -133,7 +134,7 @@ void MainWindow::showSerialPortInfo()
 
 
     double currStopBit = getStopBitCountByValue();
-    ui->textEdit_3->append("Stop bits: " + QString::number(currStopBit));
+    ui->textEdit_3->append("Stop bits: " + QString::number(currStopBit) + "\n");
 }
 
 //Проверка валидности комбинации количества стоп битов и размера байта
@@ -142,61 +143,76 @@ bool MainWindow::isValidParams()
     if(ui->comboBox_3->currentText() == "5" &&
        ui->comboBox_5->currentText() == "2")
     {
-        QMessageBox msgBox;
-        msgBox.setText("The use of 5 data bits with 2 stop bits is an invalid combination");
-        msgBox.exec();
+        ui->textEdit_3->append("The use of 5 data bits with 2 stop bits is an invalid combination");
         return false;
     }
     else if(ui->comboBox_5->currentText() == "1.5" &&
             ui->comboBox_3->currentText() != "5")
     {
-        QMessageBox msgBox;
-        msgBox.setText("The use of 6, 7, 8 data bits with 1.5 stop bits is an invalid combination");
-        msgBox.exec();
+        ui->textEdit_3->append("The use of 6, 7, 8 data bits with 1.5 stop bits is an invalid combination");
         return false;
     }
     return true;
 }
 
-//Произведено нажатие на кнопку Open
+//Произведено нажатие на кнопку Connect/Disconnect
 void MainWindow::on_pushButton_2_clicked()
 {
-    //Если не выбран ни один порт либо сочетания параметров не корректны
-    if((ui->comboBox->currentIndex() < 0) ||
-       !isValidParams())
-    {
-        return;
-    }
-
-    if(serialPort != nullptr)
-    {
-        serialPort->close();
-    }
-
-
-    serialPort = new QSerialPort(ui->comboBox->currentText(), nullptr);
-
-    online = serialPort->open(QIODevice::ReadWrite);
-
-    //Если последовательный порт успешно был открыт
+    //Если произошло нажатие на Disconnect
     if(online)
     {
-        setSerialPortInfo();
-        showSerialPortInfo();
+        ui->comboBox->setEnabled(1);
+        ui->textEdit->setEnabled(0);
+        ui->textEdit->clear();
+        ui->textEdit_2->clear();
 
-        //Создание потока чтения COM-порта
-        readerThread = new QThread;
-        //Создание класса читателя COM-порта, реализующего функционал потока readerThread
-        serialPortReader = new SerialPortReader(serialPort);
-        serialPortReader->moveToThread(readerThread);
+        serialPort->close();
+        readerThread->exit();
 
-        connect(serialPortReader, SIGNAL(dataReceived(QByteArray)), this, SLOT(updateData(QByteArray)));
-        connect(serialPortReader, SIGNAL(statusUpdated(QString)), this, SLOT(updateStatus(QString)));
-        readerThread->start();
+        updateStatus(QObject::tr("Succesfully disconnected from port %1").arg(serialPort->portName()));
+        ui->pushButton_2->setText("Connect");
+
+        online = 0;
     }
     else
     {
-        ui->textEdit_3->setText("Can't connect to " + serialPort->portName() + " port");
+        //Если не выбран ни один порт либо сочетания параметров не корректны
+        if((ui->comboBox->currentIndex() < 0) ||
+           !isValidParams())
+        {
+            return;
+        }
+
+        serialPort = new QSerialPort(ui->comboBox->currentText(), nullptr);
+
+        online = serialPort->open(QIODevice::ReadWrite);
+
+        //Если последовательный порт был успешно открыт
+        if(online)
+        {
+            setSerialPortInfo();
+
+            //Создание потока чтения COM-порта
+            readerThread = new QThread;
+            //Создание класса читателя COM-порта, реализующего функционал потока readerThread
+            serialPortReader = new SerialPortReader(serialPort);
+            serialPortReader->moveToThread(readerThread);
+
+            connect(serialPortReader, SIGNAL(dataReceived(QByteArray)), this, SLOT(updateData(QByteArray)));
+            connect(serialPortReader, SIGNAL(statusUpdated(QString)), this, SLOT(updateStatus(QString)));
+            readerThread->start();
+
+            ui->pushButton_2->setText("Disconnect");
+            ui->comboBox->setEnabled(0);
+            ui->textEdit->setEnabled(1);
+
+            updateStatus("Connected to: " + serialPort->portName() + " port");
+            showSerialPortInfo();
+        }
+        else
+        {
+            updateStatus("Can't connect to " + serialPort->portName() + " port");
+        }
     }
 }
 
@@ -205,48 +221,51 @@ void MainWindow::on_pushButton_clicked()
 {
     if(online == NULL)
     {
-        QMessageBox msgBox;
-        msgBox.setText("No opened ports");
-        msgBox.exec();
+        updateStatus("No opened ports");
         return;
     }
 
     if(isValidParams())
     {
         setSerialPortInfo();
+        updateStatus("Settings succesfully updated to " + serialPort->portName());
         showSerialPortInfo();
     }
 }
 
+//Вывод информации в Output
 void MainWindow::updateData(QByteArray data)
 {
     QString strData = QString::fromLocal8Bit(data.data());
 
-    ui->textEdit_2->setText(strData);
+    ui->textEdit_2->insertPlainText(strData);
 }
 
+//Вывод информации в Debug
 void MainWindow::updateStatus(QString info)
 {
+    QTime time;
     //Добавить текст в конец
-    ui->textEdit_3->append(info);
+    ui->textEdit_3->append(time.currentTime().toString() + ": " + info);
 }
 
-void MainWindow::on_textEdit_textChanged()
+void MainWindow::keyPressed(QChar data)
 {
     if(online)
     {
-        QByteArray writeData = ui->textEdit->toPlainText().toLocal8Bit();
+        char writeData = data.toLatin1();
+
         //Запись данных в COM-порт
-        const qint64 bytesWritten = serialPort->write(writeData);
+        const qint64 bytesWritten = serialPort->write(&writeData, 1);
 
         if (bytesWritten == -1)
         {
-            ui->textEdit_3->append(QObject::tr("Failed to write the data to port %1, error: %2")
+            updateStatus(QObject::tr("Failed to write the data to port %1, error: %2")
                                 .arg(serialPort->portName())
                                 .arg(serialPort->errorString()));
-        } else if (bytesWritten != writeData.size())
+        } else if (bytesWritten != 1)
         {
-            ui->textEdit_3->append(QObject::tr("Failed to write all the data to port %1, error: %2")
+            updateStatus(QObject::tr("Failed to write all the data to port %1, error: %2")
                                 .arg(serialPort->portName())
                                 .arg(serialPort->errorString()));
         }
