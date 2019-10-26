@@ -16,13 +16,17 @@ void MyTextEdit::keyPressEvent(QKeyEvent *event)
     //Разрешаем ввод символов только от пробела до тильды
     if ((str >= " ") && (str <= "~"))
     {
-        setText(oldText+str);
+        QString newText = oldText + str;
+        setText(newText);
 
         QTextCursor cursor = textCursor();
         //Устанавливаем курсор в конец блока текста
         cursor.movePosition(QTextCursor::EndOfBlock, QTextCursor::MoveAnchor);
         setTextCursor(cursor);
 
-        emit sendData(str.at(0));
+        if(((newText.length()) % 7) == 0)
+        {
+            emit sendData(newText.mid(cursor.position() - 7, 7));
+        }
     }
 }

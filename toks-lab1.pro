@@ -25,6 +25,7 @@ SOURCES += \
 HEADERS += \
     mainwindow.h \
     mytextedit.h \
+    packet.h \
     serialportreader.h
 
 FORMS += \

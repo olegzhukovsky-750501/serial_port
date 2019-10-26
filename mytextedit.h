@@ -2,6 +2,7 @@
 #define MYTEXTEDIT_H
 
 #include <QTextEdit>
+#include <QDebug>
 #include <QKeyEvent>
 
 class MyTextEdit : public QTextEdit
@@ -13,7 +14,7 @@ protected:
    virtual void keyPressEvent(QKeyEvent *event);
 
 signals:
-    void sendData(QChar data);
+    void sendData(QString data);
 
 };
 

@@ -6,9 +6,12 @@ MainWindow::MainWindow(QWidget *parent)
     , ui(new Ui::MainWindow)
 {
     ui->setupUi(this);
+    //Установка валидаторов на ввод адресов. Разрешен ввод только чисел от 0 до 255.
+    ui->lineEdit->setValidator(new QIntValidator(0, 255, this));
+    ui->lineEdit_2->setValidator(new QIntValidator(0, 255, this));
 
-    //Соединие сигнал о том, что клавиша была нажата в поле Input, со слотом записи данных в порт
-    connect(ui->textEdit, SIGNAL(sendData(QChar)), this, SLOT(keyPressed(QChar)));
+    //Соединие сигнала нажатия клавиши в поле Input со слотом записи данных в порт
+    connect(ui->textEdit, SIGNAL(sendData(QString)), this, SLOT(keyPressed(QString)));
 
     //Заполнение выпадающего списка всеми доступными портами в системе
     QStringList ports = availablePorts();
@@ -30,7 +33,7 @@ MainWindow::MainWindow(QWidget *parent)
     QStringList stdStopBits = {"1", "1.5", "2"};
     ui->comboBox_5->addItems(stdStopBits);
 
-    //Установка стандартных параметров COM-порта в выпадающих списке
+    //Установка стандартных параметров COM-порта в выпадающих списках
     ui->comboBox_2->setCurrentText("NoParity");
     ui->comboBox_3->setCurrentText("8");
     ui->comboBox_4->setCurrentText("9600");
@@ -155,6 +158,74 @@ bool MainWindow::isValidParams()
     return true;
 }
 
+QByteArray MainWindow::bitStuffing(QByteArray frame, QString before, QString after)
+{
+    QByteArray frameWithoutFlag(frame);
+    frameWithoutFlag.remove(0, 1);
+
+    QString bitsStr = convertFromQByteArrayToQString(frameWithoutFlag);
+
+    bitsStr.replace(before, after);
+
+    QBitArray bits(bitsStr.size());
+
+    for(int i = 0; i<bitsStr.size(); i++ )
+    {
+        if (bitsStr.at(i) == '0')
+        {
+            bits[i]=false;
+        }
+        else
+        {
+            bits[i]=true;
+        }
+    }
+
+    QByteArray resultFrame;
+
+    // Convert from QBitArray to QByteArray
+    for(int b=0; b<bits.count();++b) {
+        resultFrame[b/8] = (resultFrame.at(b/8) | ((bits[b]?1:0)<<(7-(b%8))));
+    }
+    resultFrame.insert(0, frame.at(0));
+
+    return resultFrame;
+}
+
+
+
+QString MainWindow::convertFromQByteArrayToQString(QByteArray byteArray)
+{
+    QString bitsStr;
+    for(int i=0; i<byteArray.count(); ++i)
+    {
+        std::bitset<8> fieldBits(byteArray.at(i));
+        bitsStr += QString::fromStdString(fieldBits.to_string());
+    }
+    return bitsStr;
+}
+
+bool MainWindow::fillPacketControlInfo()
+{
+    if(ui->lineEdit->text() == ui->lineEdit_2->text())
+    {
+        updateStatus("Destination address and source cannot be same");
+        return false;
+    }
+    packet.source_adr = ui->lineEdit_2->text().toInt();
+    packet.destination_adr = ui->lineEdit->text().toInt();
+
+    if(ui->checkBox->isChecked())
+    {
+        packet.fcs = 1;
+    }
+    else
+    {
+        packet.fcs = 0;
+    }
+    return true;
+}
+
 //Произведено нажатие на кнопку Connect/Disconnect
 void MainWindow::on_pushButton_2_clicked()
 {
@@ -182,6 +253,12 @@ void MainWindow::on_pushButton_2_clicked()
         {
             return;
         }
+        if(!(ui->lineEdit->text().isEmpty()) &&
+           !(ui->lineEdit_2->text().isEmpty()))
+        {
+            fillPacketControlInfo();
+            ui->textEdit->setEnabled(true);
+        }
 
         serialPort = new QSerialPort(ui->comboBox->currentText(), nullptr);
 
@@ -204,7 +281,6 @@ void MainWindow::on_pushButton_2_clicked()
 
             ui->pushButton_2->setText("Disconnect");
             ui->comboBox->setEnabled(0);
-            ui->textEdit->setEnabled(1);
 
             updateStatus("Connected to: " + serialPort->portName() + " port");
             showSerialPortInfo();
@@ -233,10 +309,30 @@ void MainWindow::on_pushButton_clicked()
     }
 }
 
-//Вывод информации в Output
-void MainWindow::updateData(QByteArray data)
+QByteArray MainWindow::deBitStuffing(QByteArray frame, QString before, QString after)
 {
-    QString strData = QString::fromLocal8Bit(data.data());
+    return bitStuffing(frame, before, after);
+}
+
+//Вывод полученных данных в Output
+void MainWindow::updateData(QByteArray receivedPacket)
+{
+    QByteArray resultFrame = deBitStuffing(receivedPacket, "00001111", "0000111");
+
+    if((resultFrame.at(10) == 1)
+            || ((unsigned char)(resultFrame.at(1)) != packet.source_adr))
+    {
+        return;
+    }
+
+    char data[8];
+    for(int i = 3; i <10; i++)
+    {
+        data[i-3] = resultFrame.at(i);
+    }
+    data[7] = '\0';
+
+    QString strData = QString::fromLocal8Bit(data);
 
     ui->textEdit_2->insertPlainText(strData);
 }
@@ -249,25 +345,69 @@ void MainWindow::updateStatus(QString info)
     ui->textEdit_3->append(time.currentTime().toString() + ": " + info);
 }
 
-void MainWindow::keyPressed(QChar data)
+void MainWindow::keyPressed(QString data)
 {
     if(online)
     {
-        char writeData = data.toLatin1();
+        for(int i = 0; i < 7; i++)
+        {
+            packet.data[i] = data.at(i).toLatin1();
+        }
+
+        char rawPacket[11];
+        rawPacket[0] = packet.flag;
+        rawPacket[1] = packet.destination_adr;
+        rawPacket[2] = packet.source_adr;
+        for(int i = 3; i < 10; i++)
+        {
+            rawPacket[i] = packet.data[i-3];
+        }
+        rawPacket[10] = packet.fcs;
+
+        QByteArray frame = QByteArray::fromRawData(rawPacket, 11);
+        QByteArray resultFrame = bitStuffing(frame, "0000111", "00001111");
+
+        std::stringstream res;
+        for(int i=0; i<resultFrame.count(); ++i)
+        {
+            std::bitset<8> fieldBits(resultFrame.at(i));
+            res << std::hex << std::uppercase << fieldBits.to_ulong() << " ";
+        }
+        updateStatus(QString::fromStdString(res.str()));
 
         //Запись данных в COM-порт
-        const qint64 bytesWritten = serialPort->write(&writeData, 1);
 
+        const qint64 bytesWritten = serialPort->write(resultFrame);
         if (bytesWritten == -1)
         {
             updateStatus(QObject::tr("Failed to write the data to port %1, error: %2")
                                 .arg(serialPort->portName())
                                 .arg(serialPort->errorString()));
-        } else if (bytesWritten != 1)
+        } else if (bytesWritten != resultFrame.length())
         {
             updateStatus(QObject::tr("Failed to write all the data to port %1, error: %2")
                                 .arg(serialPort->portName())
                                 .arg(serialPort->errorString()));
         }
     }
+}
+
+void MainWindow::on_pushButton_3_clicked()
+{
+    if((ui->lineEdit->text().isEmpty()) || (ui->lineEdit_2->text().isEmpty()))
+    {
+        updateStatus("All address fields must be filled");
+        return;
+    }
+
+    if(!fillPacketControlInfo())
+    {
+        return;
+    }
+
+    if(online)
+    {
+        ui->textEdit->setEnabled(1);
+    }
+    updateStatus("Addresses succesfully applied");
 }

@@ -13,7 +13,7 @@ public:
     explicit SerialPortReader(QSerialPort *serialPort, QObject *parent = nullptr);
 private slots:
     void handleReadyRead();
-    void handleTimeout();
+   // void handleTimeout();
     void handleError(QSerialPort::SerialPortError error);
 signals:
     void dataReceived(QByteArray data);
