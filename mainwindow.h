@@ -41,7 +41,17 @@ public:
     QByteArray bitStuffing(QByteArray frame, QString before, QString after);
     QByteArray deBitStuffing(QByteArray frame, QString before, QString after);
     QString convertFromQByteArrayToQString(QByteArray byteArray);
+    QByteArray convertFromQBitArrayToQByteArray(QBitArray bitArray);
+    template<std::size_t N>
+    QByteArray convertFromBitsetToQByteArray(std::bitset<N> &b);
     bool fillPacketControlInfo();
+    int randomBetween(int low, int high);
+    char crc8(char const message[]);
+    char detectError(char const message[]);
+    void rotateLeft(std::bitset<88>& b, unsigned m);
+    void rotateRight(std::bitset<88>& b, unsigned m);
+    void outputQByteArrayInHex(QByteArray b);
+
 
 private slots:
     void on_pushButton_2_clicked();

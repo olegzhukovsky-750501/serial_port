@@ -181,12 +181,8 @@ QByteArray MainWindow::bitStuffing(QByteArray frame, QString before, QString aft
         }
     }
 
-    QByteArray resultFrame;
+    QByteArray resultFrame = convertFromQBitArrayToQByteArray(bits);
 
-    // Convert from QBitArray to QByteArray
-    for(int b=0; b<bits.count();++b) {
-        resultFrame[b/8] = (resultFrame.at(b/8) | ((bits[b]?1:0)<<(7-(b%8))));
-    }
     resultFrame.insert(0, frame.at(0));
 
     return resultFrame;
@@ -205,6 +201,15 @@ QString MainWindow::convertFromQByteArrayToQString(QByteArray byteArray)
     return bitsStr;
 }
 
+QByteArray MainWindow::convertFromQBitArrayToQByteArray(QBitArray bitArray)
+{
+    QByteArray byteArray;
+    for(int b=0; b<bitArray.count();++b) {
+        byteArray[b/8] = (byteArray.at(b/8) | ((bitArray[b]?1:0)<<(7-(b%8))));
+    }
+    return byteArray;
+}
+
 bool MainWindow::fillPacketControlInfo()
 {
     if(ui->lineEdit->text() == ui->lineEdit_2->text())
@@ -214,16 +219,79 @@ bool MainWindow::fillPacketControlInfo()
     }
     packet.source_adr = ui->lineEdit_2->text().toInt();
     packet.destination_adr = ui->lineEdit->text().toInt();
-
-    if(ui->checkBox->isChecked())
-    {
-        packet.fcs = 1;
-    }
-    else
-    {
-        packet.fcs = 0;
-    }
     return true;
+}
+
+int MainWindow::randomBetween(int low, int high)
+{
+    return (qrand() % ((high +1) - low) + low);
+}
+
+char MainWindow::crc8(char const message[])
+{
+    char remainder = 0;
+
+    for (int byte = 0; byte < 10; ++byte)
+    {
+        remainder ^= message[byte];
+        for(int bit = 8; bit > 0; --bit)
+        {
+            if(remainder & 0x80)
+            {
+                remainder = (remainder << 1) ^ 0x07;
+            }
+            else
+            {
+                remainder = (remainder << 1);
+            }
+        }
+
+    }
+    return remainder;
+}
+
+char MainWindow::detectError(const char message[])
+{
+    char remainder = 0;
+
+    for (int byte = 0; byte < 11; ++byte)
+    {
+        remainder ^= message[byte];
+        for(int bit = 8; bit > 0; --bit)
+        {
+            if(remainder & 0x80)
+            {
+                remainder = (remainder << 1) ^ 0x07;
+            }
+            else
+            {
+                remainder = (remainder << 1);
+            }
+        }
+
+    }
+    return remainder;
+}
+
+void MainWindow::rotateLeft(std::bitset<88> &b, unsigned m)
+{
+    b = b >> m | b << (88 - m);
+}
+
+void MainWindow::rotateRight(std::bitset<88> &b, unsigned m)
+{
+    b = b << m | b >> (88 - m);
+}
+
+void MainWindow::outputQByteArrayInHex(QByteArray b)
+{
+    std::stringstream res;
+    for(int i=0; i< b.count(); ++i)
+    {
+        std::bitset<8> fieldBits(b.at(i));
+        res << std::hex << std::uppercase << fieldBits.to_ulong() << " ";
+    }
+    updateStatus(QString::fromStdString(res.str()));
 }
 
 //Произведено нажатие на кнопку Connect/Disconnect
@@ -311,13 +379,122 @@ void MainWindow::on_pushButton_clicked()
 
 QByteArray MainWindow::deBitStuffing(QByteArray frame, QString before, QString after)
 {
-    return bitStuffing(frame, before, after);
+    QByteArray deBitStuffedPacket = bitStuffing(frame, before, after);
+    if(deBitStuffedPacket.length() >= 12)
+    {
+       return deBitStuffedPacket.remove(11, 1);
+    }
+    return deBitStuffedPacket;
 }
 
 //Вывод полученных данных в Output
 void MainWindow::updateData(QByteArray receivedPacket)
 {
     QByteArray resultFrame = deBitStuffing(receivedPacket, "00001111", "0000111");
+
+    char remainder = detectError(resultFrame);
+
+    //updateStatus(QString::number(remainder));
+
+    if(remainder)
+    {
+        updateStatus("Data error(CRC): "  + QString::number((unsigned char)remainder));
+
+        //std::bitset<8> remainderBits(remainder);
+        //updateStatus(QString::fromStdString(remainderBits.to_string()));
+
+        std::bitset<88> resultFrameBits;
+//        for(int i =0;i < resultFrame.length(); ++i)
+//        {
+//            char curr = resultFrame.at(resultFrame.length() - 1 - i);
+//            for(int bit = 0; bit < 8 && curr; ++bit)
+//            {
+//                if(curr & 0x1)
+//                {
+//                    resultFrameBits.set(8 * i + bit);
+//                }
+//                curr >>=1;
+//            }
+//        }
+
+        for(int i =0;i < resultFrame.length(); ++i)
+        {
+            char curr = resultFrame.at(i);
+            for(int bit = 7; bit >= 0 && curr; --bit)
+            {
+                if(curr & 0x1)
+                {
+                    resultFrameBits.set(8 * i + bit);
+                }
+                curr >>=1;
+            }
+        }
+
+//        std::bitset<88> extendedRemainderBits;
+
+//        for(int i = 7;  i >=0; --i)
+//        {
+//            extendedRemainderBits.set(87 - i, remainderBits[i]);
+//        }
+
+        QByteArray temp = convertFromBitsetToQByteArray(resultFrameBits);
+
+        for(int i = 0; i < 88; i++)
+        {
+            resultFrameBits.flip(i);
+
+            char remainder = detectError(convertFromBitsetToQByteArray(resultFrameBits));
+
+            if(remainder == 0)
+            {
+                resultFrame = convertFromBitsetToQByteArray(resultFrameBits);
+                break;
+            }
+            else
+            {
+                resultFrameBits.flip(i);
+            }
+        }
+
+
+//        int shiftN = 0;
+//        std::bitset<88> resultCombination;
+//        while(1)
+//        {
+//            if(extendedRemainderBits.count() <= 1)
+//            {
+//                resultCombination = resultFrameBits ^ extendedRemainderBits;
+//                updateStatus(QString::number(shiftN));
+//                for(int i = 0; i < shiftN; i++)
+//                {
+//                   rotateLeft(resultCombination, 1);
+//                }
+//                updateStatus(QString::fromStdString(resultCombination.to_string()));
+//                resultFrame = convertFromBitsetToQByteArray(resultCombination);
+//                break;
+//            }
+//            else
+//            {
+//                shiftN++;
+//                rotateRight(resultFrameBits, 1);
+//                remainder = detectError(convertFromBitsetToQByteArray(resultFrameBits));
+
+//                updateStatus(QString::number(remainder));
+
+//                updateStatus(QString::fromStdString(resultFrameBits.to_string()));
+
+//                std::bitset<8> remainderBits(remainder);
+
+//                extendedRemainderBits.reset();
+//                for(int i = 7;  i  >= 0; --i)
+//                {
+//                    extendedRemainderBits.set(88 - i, remainderBits[i]);
+//                }
+
+//                updateStatus(QString::fromStdString(extendedRemainderBits.to_string()));
+//            }
+//        }
+    }
 
     if((resultFrame.at(10) == 1)
             || ((unsigned char)(resultFrame.at(1)) != packet.source_adr))
@@ -362,18 +539,33 @@ void MainWindow::keyPressed(QString data)
         {
             rawPacket[i] = packet.data[i-3];
         }
+
+        packet.fcs = crc8(rawPacket);
+
         rawPacket[10] = packet.fcs;
 
         QByteArray frame = QByteArray::fromRawData(rawPacket, 11);
+
+        //outputQByteArrayInHex(frame);
+
+        if(ui->checkBox->isChecked())
+        {
+            qsrand(QDateTime::currentMSecsSinceEpoch() / 1000);
+
+            int bitNum = randomBetween(0, ((frame.length() - 1) * 8) - 1);
+
+            int byteNum = bitNum / 8;
+
+            char byteToReplace = frame.at(byteNum) ^ (1 << (7 - (bitNum - (byteNum * 8))));
+
+            frame.replace(byteNum, 1, &byteToReplace, 1);
+        }
+
+        //outputQByteArrayInHex(frame);
+
         QByteArray resultFrame = bitStuffing(frame, "0000111", "00001111");
 
-        std::stringstream res;
-        for(int i=0; i<resultFrame.count(); ++i)
-        {
-            std::bitset<8> fieldBits(resultFrame.at(i));
-            res << std::hex << std::uppercase << fieldBits.to_ulong() << " ";
-        }
-        updateStatus(QString::fromStdString(res.str()));
+        outputQByteArrayInHex(resultFrame);
 
         //Запись данных в COM-порт
 
@@ -410,4 +602,14 @@ void MainWindow::on_pushButton_3_clicked()
         ui->textEdit->setEnabled(1);
     }
     updateStatus("Addresses succesfully applied");
+}
+
+template<std::size_t N>
+QByteArray MainWindow::convertFromBitsetToQByteArray(std::bitset<N> &bits)
+{
+    QByteArray byteArray;
+    for(int b=0; b < N;++b) {
+        byteArray[b/8] = (byteArray.at(b/8) | ((bits[b]?1:0)<<(7-(b%8))));
+    }
+    return byteArray;
 }
